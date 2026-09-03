@@ -517,10 +517,8 @@ function App() {
       const liveBlobUrl = URL.createObjectURL(currentFile.file);
 
       try {
-        const formData = new FormData();
-        formData.append("image", currentFile.file);
-
-        const res = await fetch("http://localhost:5001/process", {
+        const ocrBase = window.OCR_API_URL || localStorage.getItem("OCR_API_URL") || "http://localhost:5001";
+        const res = await fetch(`${ocrBase.replace(/\/$/, "")}/process`, {
           method: "POST",
           body: formData,
         });

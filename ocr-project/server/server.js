@@ -46,9 +46,13 @@ async function startServer() {
     console.warn("⚠️ MySQL Database not currently running. Backend running in standalone desktop mode.");
   }
 
-  app.listen(PORT, () => {
-    console.log(`🚀 Inventory Verification Backend running on http://localhost:${PORT}`);
-  });
+  if (process.env.NODE_ENV !== "test" && !process.env.VERCEL) {
+    app.listen(PORT, () => {
+      console.log(`🚀 Inventory Verification Backend running on http://localhost:${PORT}`);
+    });
+  }
 }
 
 startServer();
+
+module.exports = app;
