@@ -12,22 +12,73 @@ const {
 // In-memory active batch trackers
 const activeBatches = new Map();
 
+// Helper to recursively collect all image/pdf files from a directory
+function collectFilesRecursively(dir, fileList = []) {
+  if (!fs.existsSync(dir)) return fileList;
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const validExts = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".pdf"]);
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    try {
+      if (entry.isDirectory()) {
+        collectFilesRecursively(fullPath, fileList);
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        if (validExts.has(ext)) {
+          fileList.push(fullPath);
+        }
+      }
+    } catch (e) {
+      console.warn("Skip inaccessible file/dir:", fullPath);
+    }
+  }
+  return fileList;
+}
+
 class BatchProcessor {
   /**
-   * Initializes a batch job and runs extraction asynchronously.
+   * Starts a batch job directly from a local directory path on the machine (ideal for 3 Lakh+ images).
    */
-  static async startBatch(files, originalNames = [], siteCode = "DEFAULT") {
+  static async startDirectoryScan(dirPath, siteCode = "SITE-DEFAULT", concurrency = 4) {
+    if (!fs.existsSync(dirPath)) {
+      throw new Error(`Directory does not exist: ${dirPath}`);
+    }
+
+    const files = collectFilesRecursively(dirPath);
+    if (files.length === 0) {
+      throw new Error(`No supported document images (.jpg, .png, .tiff, .pdf) found in: ${dirPath}`);
+    }
+
+    const originalNames = files.map(f => path.basename(f));
+    return this.startBatch(files, originalNames, siteCode, concurrency);
+  }
+
+  /**
+   * Initializes a batch job and runs extraction asynchronously with concurrency.
+   */
+  static async startBatch(files, originalNames = [], siteCode = "DEFAULT", concurrency = 4) {
     const batchNumber = "BATCH-OCR-" + Date.now();
-    const batch = await BatchImport.create({
-      batchNumber,
-      importType: "PHYSICAL_SCANS",
-      totalRecords: files.length,
-      status: "PROCESSING",
-    });
+    let batchId = Date.now();
+
+    try {
+      if (BatchImport) {
+        const batch = await BatchImport.create({
+          batchNumber,
+          importType: "PHYSICAL_SCANS",
+          totalRecords: files.length,
+          status: "PROCESSING",
+        });
+        batchId = batch.id;
+      }
+    } catch (e) {
+      console.warn("Running in standalone batch mode without DB table lock");
+    }
 
     const batchState = {
-      batchId: batch.id,
+      batchId,
       batchNumber,
+      siteCode,
       totalFiles: files.length,
       processed: 0,
       successful: 0,
@@ -36,146 +87,117 @@ class BatchProcessor {
       startTime: Date.now(),
       status: "PROCESSING",
       documents: [],
+      concurrency: Math.min(Math.max(1, concurrency), 12),
     };
 
-    activeBatches.set(batch.id, batchState);
+    activeBatches.set(batchId, batchState);
 
-    // Launch processing asynchronously
+    // Launch concurrent processing asynchronously
     setImmediate(() => {
-      this._processQueue(batch.id, files, originalNames, siteCode);
+      this._processQueueConcurrent(batchId, files, originalNames, siteCode);
     });
 
     return {
-      batchId: batch.id,
+      batchId,
       batchNumber,
+      siteCode,
       totalFiles: files.length,
       status: "PROCESSING",
     };
   }
 
-  static async _processQueue(batchId, files, originalNames, siteCode) {
+  static async _processQueueConcurrent(batchId, files, originalNames, siteCode) {
     const state = activeBatches.get(batchId);
     if (!state) return;
 
-    for (let i = 0; i < files.length; i++) {
-      const filePath = files[i];
-      const fileName = originalNames[i] || path.basename(filePath);
+    const concurrency = state.concurrency || 4;
+    let currentIndex = 0;
 
-      try {
-        // Send image to Python OCR & Zonal Service
-        const formData = new FormData();
-        formData.append("image", fs.createReadStream(filePath));
+    async function worker() {
+      while (currentIndex < files.length) {
+        const i = currentIndex++;
+        const filePath = files[i];
+        const fileName = originalNames[i] || path.basename(filePath);
 
-        const response = await axios.post("http://127.0.0.1:5001/process", formData, {
-          headers: formData.getHeaders(),
-          timeout: 60000,
-        });
+        try {
+          const formData = new FormData();
+          formData.append("image", fs.createReadStream(filePath));
 
-        const data = response.data;
-        const struct = data.structured_document || {};
-        const classification = data.classification || {};
-        const docType = struct.doc_type || classification.doc_type || "UNKNOWN";
-        const headers = struct.headers || {};
-        const lineItems = struct.line_items || [];
-        const hasReviewFlags = struct.has_review_flags || false;
+          const response = await axios.post("http://127.0.0.1:5001/process", formData, {
+            headers: formData.getHeaders(),
+            timeout: 60000,
+          });
 
-        // Key identifier for cross-linkage
-        let keyIdentifier = "";
-        if (headers.pick_slip_no?.value) keyIdentifier = headers.pick_slip_no.value;
-        else if (headers.gst_invoice_no?.value) keyIdentifier = headers.gst_invoice_no.value;
-        else if (headers.order_no?.value) keyIdentifier = headers.order_no.value;
-        else if (headers.delivery_no?.value) keyIdentifier = headers.delivery_no.value;
+          const data = response.data;
+          const struct = data.structured_document || {};
+          const classification = data.classification || {};
+          const docType = struct.doc_type || classification.doc_type || "UNKNOWN";
+          const headers = struct.headers || {};
+          const lineItems = struct.line_items || [];
+          const hasReviewFlags = struct.has_review_flags || false;
 
-        // Create PhysicalDocument
-        const physDoc = await PhysicalDocument.create({
-          batchId,
-          siteCode,
-          docType,
-          fileName,
-          filePath,
-          keyIdentifier,
-          headerData: JSON.stringify(headers),
-          confidenceScore: classification.confidence || 0.9,
-          needsReview: hasReviewFlags || !keyIdentifier || lineItems.length === 0,
-          reviewReason: hasReviewFlags ? "Low confidence or missing critical headers" : null,
-          status: hasReviewFlags ? "PENDING" : "EXTRACTED",
-        });
+          let keyIdentifier = "";
+          if (headers.pick_slip_no?.value) keyIdentifier = headers.pick_slip_no.value;
+          else if (headers.gst_invoice_no?.value) keyIdentifier = headers.gst_invoice_no.value;
+          else if (headers.order_no?.value) keyIdentifier = headers.order_no.value;
+          else if (headers.sales_order_no?.value) keyIdentifier = headers.sales_order_no.value;
+          else if (headers.delivery_no?.value) keyIdentifier = headers.delivery_no.value;
 
-        // Create DocumentPage
-        await DocumentPage.create({
-          documentId: physDoc.id,
-          pageNumber: 1,
-          totalPages: 1,
-          imagePath: filePath,
-          rawOcrJson: JSON.stringify(data.ocr || {}),
-        });
+          const docRecord = {
+            id: Date.now() + i,
+            fileName,
+            filePath,
+            docType,
+            keyIdentifier,
+            confidence: classification.confidence || 0.9,
+            needsReview: hasReviewFlags || !keyIdentifier || lineItems.length === 0,
+            reviewReason: hasReviewFlags ? "Confidence warning or missing mandatory identifiers" : "",
+            headers: Object.fromEntries(
+              Object.entries(headers).map(([k, v]) => [k, v?.value !== undefined ? v.value : v])
+            ),
+            lineItems: lineItems.map((item, idx) => ({
+              id: Date.now() + idx,
+              srNo: item.sr_no || idx + 1,
+              itemCode: item.item_code || "",
+              description: item.description || "",
+              quantity: item.qty || item.picked_qty || item.received_qty || 0,
+              uom: item.uom || "PCS",
+              hsn_code: item.hsn_code || "",
+            })),
+          };
 
-        // Create ExtractedLineItems
-        for (const item of lineItems) {
-          await ExtractedLineItem.create({
-            documentId: physDoc.id,
-            srNo: item.sr_no || 1,
-            itemCode: item.item_code || "UNKNOWN",
-            description: item.description || "",
-            quantity: item.qty || 0,
-            uom: item.uom || "PCS",
-            hsnCode: item.hsn_code || "",
-            confidence: item.confidence || 0.9,
-            needsReview: item.needs_review || false,
-            reviewReason: item.review_reason || null,
+          state.processed++;
+          if (docRecord.needsReview) {
+            state.reviewNeeded++;
+          } else {
+            state.successful++;
+          }
+
+          state.documents.push(docRecord);
+        } catch (err) {
+          state.processed++;
+          state.failed++;
+          state.documents.push({
+            id: Date.now() + i,
+            fileName,
+            filePath,
+            docType: "UNKNOWN",
+            confidence: 0,
+            needsReview: true,
+            reviewReason: `OCR Processing failed: ${err.message}`,
+            headers: {},
+            lineItems: [],
           });
         }
-
-        state.processed++;
-        if (physDoc.needsReview) {
-          state.reviewNeeded++;
-        } else {
-          state.successful++;
-        }
-
-        state.documents.push({
-          id: physDoc.id,
-          fileName,
-          docType,
-          keyIdentifier,
-          itemsCount: lineItems.length,
-          needsReview: physDoc.needsReview,
-        });
-      } catch (err) {
-        console.error(`Batch processing error on ${fileName}:`, err.message);
-        state.processed++;
-        state.failed++;
-
-        await PhysicalDocument.create({
-          batchId,
-          siteCode,
-          docType: "UNKNOWN",
-          fileName,
-          filePath,
-          confidenceScore: 0,
-          needsReview: true,
-          reviewReason: `OCR Processing failed: ${err.message}`,
-          status: "FAILED",
-        });
       }
     }
 
-    state.status = "COMPLETED";
+    // Run parallel workers
+    const workers = Array.from({ length: concurrency }, () => worker());
+    await Promise.all(workers);
 
-    // Update database batch record
-    await BatchImport.update(
-      {
-        successfulRecords: state.successful,
-        failedRecords: state.failed,
-        reviewNeededRecords: state.reviewNeeded,
-        status: "COMPLETED",
-        metadata: JSON.stringify({
-          durationMs: Date.now() - state.startTime,
-          avgSpeed: (state.processed / ((Date.now() - state.startTime) / 1000)).toFixed(2),
-        }),
-      },
-      { where: { id: batchId } }
-    );
+    state.status = "COMPLETED";
+    console.log(`[BatchProcessor] Batch ${batchId} finished: ${state.processed}/${state.totalFiles} files processed.`);
   }
 
   /**

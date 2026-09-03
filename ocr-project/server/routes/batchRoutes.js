@@ -31,6 +31,47 @@ router.post("/upload-bulk", upload.array("files", 100), async (req, res) => {
   }
 });
 
+// Scan & Ingest direct local directory (designed for 3 Lakh+ images)
+router.post("/scan-directory", async (req, res) => {
+  try {
+    const { directoryPath, siteCode = "SITE-DEFAULT", concurrency = 4 } = req.body;
+    if (!directoryPath) {
+      return res.status(400).json({ success: false, error: "directoryPath is required" });
+    }
+
+    const job = await BatchProcessor.startDirectoryScan(directoryPath, siteCode, concurrency);
+    res.json({
+      success: true,
+      message: `Scanning initiated for ${job.totalFiles} documents from ${directoryPath}`,
+      data: job,
+    });
+  } catch (error) {
+    console.error("Directory scan error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get streaming documents from active batch
+router.get("/live-docs/:batchId", (req, res) => {
+  const { batchId } = req.params;
+  const offset = parseInt(req.query.offset || "0", 10);
+  const status = BatchProcessor.getBatchStatus(batchId);
+  if (!status) {
+    return res.status(404).json({ success: false, error: "Batch not found or not active" });
+  }
+
+  const docs = status.documents.slice(offset);
+  res.json({
+    success: true,
+    batchId,
+    total: status.totalFiles,
+    processed: status.processed,
+    docs,
+    nextOffset: offset + docs.length,
+    isCompleted: status.status === "COMPLETED",
+  });
+});
+
 // Get live status of a batch job
 router.get("/status/:batchId", async (req, res) => {
   try {
