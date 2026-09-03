@@ -517,11 +517,23 @@ function App() {
       const liveBlobUrl = URL.createObjectURL(currentFile.file);
 
       try {
-        const ocrBase = window.OCR_API_URL || localStorage.getItem("OCR_API_URL") || "http://localhost:5001";
-        const res = await fetch(`${ocrBase.replace(/\/$/, "")}/process`, {
-          method: "POST",
-          body: formData,
-        });
+        const endpoints = [
+          window.OCR_API_URL,
+          localStorage.getItem("OCR_API_URL"),
+          "http://127.0.0.1:5001/process",
+          "http://localhost:5001/process"
+        ].filter(Boolean);
+
+        let res = null;
+        for (const ep of endpoints) {
+          const url = ep.endsWith("/process") ? ep : `${ep.replace(/\/$/, "")}/process`;
+          try {
+            res = await fetch(url, { method: "POST", body: formData });
+            if (res && res.ok) break;
+          } catch (e) {
+            console.warn(`Endpoint ${url} failed, trying next...`);
+          }
+        }
 
         if (res.ok) {
           const result = await res.json();
