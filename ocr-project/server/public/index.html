@@ -11,7 +11,17 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script>
+    // ── Backend API Base URL Configuration ──
+    // When deployed on Vercel (frontend-only), set this to your Render backend URL.
+    // e.g. window.BACKEND_BASE_URL = "https://inva-audit-backend.onrender.com";
+    // When running locally (Node server serves this file), leave as empty string.
+    window.BACKEND_BASE_URL = window.BACKEND_BASE_URL || "";
+    window.OCR_API_URL = window.BACKEND_BASE_URL ? window.BACKEND_BASE_URL + "/api/ocr/process" : "";
+    window.BATCH_API_BASE = window.BACKEND_BASE_URL ? window.BACKEND_BASE_URL + "/api/batch" : "/api/batch";
+  </script>
   <style>
+
     :root {
       --bg-main: #080c16;
       --bg-card: #0f1624;
@@ -526,7 +536,8 @@ function App() {
     setProgress({ processed: 0, total: 0, pct: 0, speed: 0, eta: 0, status: "DISCOVERING_FILES" });
 
     try {
-      const res = await fetch("/api/batch/scan-directory", {
+      const baseUrl = window.BATCH_API_BASE || "/api/batch";
+      const res = await fetch(`${baseUrl}/scan-directory`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ directoryPath: localDir.trim(), siteCode, concurrency })
@@ -553,9 +564,10 @@ function App() {
     let offset = 0;
     const pollTimer = setInterval(async () => {
       try {
+        const baseUrl = window.BATCH_API_BASE || "/api/batch";
         const [statusRes, docsRes] = await Promise.all([
-          fetch(`/api/batch/status/${batchId}`).then(r => r.json()).catch(() => ({})),
-          fetch(`/api/batch/live-docs/${batchId}?offset=${offset}`).then(r => r.json()).catch(() => ({}))
+          fetch(`${baseUrl}/status/${batchId}`).then(r => r.json()).catch(() => ({})),
+          fetch(`${baseUrl}/live-docs/${batchId}?offset=${offset}`).then(r => r.json()).catch(() => ({}))
         ]);
 
         if (statusRes.success && statusRes.status) {
