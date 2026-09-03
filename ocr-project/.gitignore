@@ -1,0 +1,53 @@
+# Node
+node_modules/
+npm-debug.log*
+.npm
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.spec
+venv/
+.venv/
+env/
+
+# OCR model weights and large binary assets
+image-service/models/
+*.onnx
+*.paddle
+*.traineddata
+
+# Runtime image processing dirs
+image-service/processed/
+image-service/uploads/
+server/uploads/
+server/public/scans/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Test output
+test_ocr_out.json
