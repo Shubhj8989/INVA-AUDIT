@@ -1,0 +1,27 @@
+services:
+  # ── Node.js Backend (Express API + Batch Processor) ──
+  - type: web
+    name: inva-audit-backend
+    runtime: node
+    rootDir: ocr-project/server
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: OCR_API_URL
+        value: https://inva-audit-ocr.onrender.com
+    healthCheckPath: /api/status
+
+  # ── Python RapidOCR Image Service ──
+  - type: web
+    name: inva-audit-ocr
+    runtime: python
+    rootDir: ocr-project/image-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT app:app
+    envVars:
+      - key: PORT
+        value: 5001
