@@ -4,12 +4,31 @@
   "description": "INVA-AUDIT Physical Inventory Verification Desktop Application",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.invaaudit.desktop",
+    "productName": "INVA-AUDIT",
+    "directories": {
+      "output": "../dist-desktop"
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "nsis": {
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "keywords": ["ocr", "inventory", "audit", "desktop", "electron"],
   "author": "INVA-AUDIT",
   "license": "ISC",
   "devDependencies": {
-    "electron": "^28.2.0"
+    "electron": "^28.2.0",
+    "electron-builder": "^24.9.1"
   }
 }
