@@ -1,0 +1,15 @@
+{
+  "name": "inva-audit-desktop",
+  "version": "2.0.0",
+  "description": "INVA-AUDIT Physical Inventory Verification Desktop Application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": ["ocr", "inventory", "audit", "desktop", "electron"],
+  "author": "INVA-AUDIT",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^28.2.0"
+  }
+}

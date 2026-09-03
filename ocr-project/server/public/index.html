@@ -588,6 +588,27 @@ function App() {
     else { setSelId(null); setEditLines([]); }
   };
 
+  // ── Flag current doc for re-scan ──
+  const handleFlagReScan = () => {
+    if (!selDoc) return;
+    const updated = queue.map(d => {
+      if (d.id === selId) {
+        return {
+          ...d,
+          needsReview: true,
+          flaggedForRescan: true,
+          reviewReason: "🚩 Flagged for Re-scan: Low quality / illegible text"
+        };
+      }
+      return d;
+    });
+    setQueue(updated);
+    const nextPending = updated.find(d => d.id !== selId && !d.flaggedForRescan);
+    if (nextPending) {
+      selectQueueDoc(nextPending);
+    }
+  };
+
   // ── Reconciliation state ──
   const [reconSubTab, setReconSubTab] = useState("outward"); // outward | inward | transfer
   const [reconState, setReconState] = useState("idle"); // idle | running | done
@@ -830,7 +851,7 @@ function App() {
                 <div className="panel-sub">Documents with confidence &lt;80% or stacked-row assembly anomalies require manual validation</div>
               </div>
               <div style={{ display: "flex", gap: 10 }}>
-                <button id="btn-flag" className="btn btn-danger" disabled={!selDoc}>🚩 Flag for Re-scan</button>
+                <button id="btn-flag" className="btn btn-danger" onClick={handleFlagReScan} disabled={!selDoc}>🚩 Flag for Re-scan</button>
                 <button id="btn-approve" className="btn btn-success" onClick={handleApprove} disabled={!selDoc}>✅ Approve & Verify</button>
               </div>
             </div>
@@ -859,12 +880,16 @@ function App() {
                       const [typeLabel, typeCls] = docTypeLabel(doc.docType);
                       return (
                         <div key={doc.id} className={`dqs-item ${doc.id === selId ? "selected" : ""}`} onClick={() => selectQueueDoc(doc)}>
-                          <span className="file-icon">🖼️</span>
+                          <span className="file-icon">{doc.flaggedForRescan ? "🚩" : "🖼️"}</span>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div className="dqs-fname">{doc.fileName}</div>
-                            <div style={{ marginTop: 3, display: "flex", gap: 6 }}>
+                            <div style={{ marginTop: 3, display: "flex", gap: 6, flexWrap: "wrap" }}>
                               <span className={`badge ${typeCls}`}>{typeLabel}</span>
-                              {doc.needsReview && <span className="badge b-review">Needs Review</span>}
+                              {doc.flaggedForRescan ? (
+                                <span className="badge b-flagged" style={{ background: "rgba(239,68,68,0.2)", color: "#f87171", border: "1px solid rgba(239,68,68,0.4)" }}>🚩 Re-scan</span>
+                              ) : (
+                                doc.needsReview && <span className="badge b-review">Needs Review</span>
+                              )}
                             </div>
                           </div>
                           <div className={`dqs-conf ${doc.confidence >= 0.9 ? "fs-done" : doc.confidence >= 0.8 ? "" : "fs-error"}`}
